@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::OpenOptions, io::Write};
 
+use crate::crypto::authentify_content;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PasswordFile {
     owner: String,
@@ -85,7 +87,18 @@ impl PasswordFile {
         None
     }
 
-    pub fn save(&self) -> std::io::Result<()> {
+    pub fn get_and_verify(owner: &String,  sym_key : &Vec<u8>) -> Option<PasswordFile>{
+        let password_file = Self::get(owner)?;
+        if password_file.mac == authentify_content(sym_key, &password_file.format_elements_to_hash()).as_slice() {
+            Some(password_file)
+        }
+        else{
+            None
+        }
+    }
+
+    pub fn save(&mut self, sym_key : &Vec<u8>) -> std::io::Result<()> {
+        self.mac = authentify_content(sym_key, &self.format_elements_to_hash()).as_slice().to_vec();
         const PATH_TO_DATABASE: &str = "data/";
         //self.format_elements_to_hash();
         std::fs::remove_file(PATH_TO_DATABASE.to_string() + &self.owner + ".json").ok();
@@ -106,7 +119,7 @@ mod tests {
 
     #[test]
     fn functionnement_test() {
-        let password_file = PasswordFile::new(
+        let mut password_file = PasswordFile::new(
             "owner_that_schould_not_exist[".to_string(),
             "public_key".as_bytes().to_vec(),
             "encrypted_private_key".as_bytes().to_vec(),
@@ -114,7 +127,7 @@ mod tests {
             "master_key_hash".as_bytes().to_vec(),
             "symetric_key_salut".as_bytes().to_vec(),
         );
-        assert!(password_file.save().is_ok());
+        assert!(password_file.save(&"fake_key".as_bytes().to_vec()).is_ok());
         assert!(
             password_file.owner
                 == PasswordFile::get(&"owner_that_schould_not_exist[".to_string())

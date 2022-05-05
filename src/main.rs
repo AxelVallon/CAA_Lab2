@@ -20,13 +20,16 @@ fn recover_handler(account: &String, sym_key: &Vec<u8>) {
         .msg("Please enter the password label : ")
         .get();
     println!();
-    match files_manager::PasswordFile::get(&account) {
+    match files_manager::PasswordFile::get_and_verify(&account, &sym_key) {
         Some(password_file) => match recover_password(&label_input, sym_key, &password_file) {
             Ok(clear_password) => match clear_password {
                 Some(clear_password) => {
+                    let password = std::str::from_utf8(clear_password.as_slice()).unwrap();
+                    copy_to_clipboard(&password.to_string());
                     println!(
-                        "{}{}", "Password found : ".color(Color::Green),
-                        std::str::from_utf8(clear_password.as_slice()).unwrap()
+                        "{}{}{}", "Password found : ".color(Color::Green),
+                        password,
+                        "\nPassword copied in clipboard".color(Color::Cyan)
                     )
                 }
                 None => {
@@ -97,7 +100,7 @@ fn add_handler(account: &String, sym_key: &Vec<u8>) {
     let mut password: Vec<u8> = password_input.as_bytes().to_vec();
     password.resize(128, 0u8);
     // we open the user file
-    match files_manager::PasswordFile::get(&account) {
+    match files_manager::PasswordFile::get_and_verify(&account, &sym_key) {
         Some(mut password_file) => {
             let encrypted_password =
                 SymetricEncryption::encrypt(&sym_key, &password).unwrap();
@@ -108,7 +111,7 @@ fn add_handler(account: &String, sym_key: &Vec<u8>) {
                     encrypted_password: encrypted_password.ciphertext,
                 },
             );
-            if password_file.save().is_ok() {
+            if password_file.save(&sym_key).is_ok() {
                 println!("{}","Password saved".color(Color::Green))
             } else {
                print_failed_to_save_local_file();
@@ -139,7 +142,7 @@ fn change_handler(account: &String, sym_key: &Vec<u8>) -> bool {
     println!();
     let new_hash = crypto::hash_password_argon2id(&password_input);
     let new_key = crypto::generate_sym_key(&password_input);
-    match files_manager::PasswordFile::get(&account) {
+    match files_manager::PasswordFile::get_and_verify(&account, &sym_key) {
         Some(mut password_file) => {
             // Decryption and encryption of the RSA private key
             match decrypt_and_encrypt(
@@ -172,7 +175,7 @@ fn change_handler(account: &String, sym_key: &Vec<u8>) -> bool {
                     password_file.encrypted_private_key_nonce = new_private_key_encrypted.nonce;
                     password_file.master_key_hash = new_hash.as_bytes().to_vec();
                     password_file.symetric_key_salt = new_key.salt;
-                    if password_file.save().is_ok() {
+                    if password_file.save(&sym_key).is_ok() {
                         println!("{}", "Success ! Password modification successful".color(Color::Green));
                         return true;
                     } else {
@@ -215,7 +218,7 @@ fn share_handler(account: &String, sym_key: &Vec<u8>) {
     }
 
     println!();
-    match files_manager::PasswordFile::get(&account) {
+    match files_manager::PasswordFile::get_and_verify(&account, &sym_key) {
         // the local file is valid
         Some(local_account) => {
             match files_manager::PasswordFile::get(&username_input) {
@@ -241,7 +244,7 @@ fn share_handler(account: &String, sym_key: &Vec<u8>) {
                                             match parameters.encrypt(clear_password.as_slice()) {
                                                 Ok(shared_password) => {
                                                     distant_file.shared_passwords.insert(files_manager::SharedPasswordIdentificatior{ owner: account.clone(), label: label_input }, shared_password );
-                                                    if distant_file.save().is_ok() {
+                                                    if distant_file.save(&sym_key).is_ok() {
                                                         println!("{}", "Success ! Password shared".color(Color::Green));
                                                     } else {
                                                         println!("{}", "Operation failed. We were unable to update the distant file".color(Color::Orange1));

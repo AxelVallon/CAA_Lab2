@@ -1,5 +1,5 @@
 use crate::crypto::SymetricEncryption;
-use crate::crypto::{self, AsymetricEncryption};
+use crate::crypto::{self, AsymetricEncryption, authentify_content};
 use crate::files_manager;
 
 pub struct Credentials {
@@ -9,15 +9,20 @@ pub struct Credentials {
 
 impl Credentials {
     pub fn login(&self) -> Option<Vec<u8>> {
-        //TODO verify MAC
         // if file doesn't exist, this user doesn't exist. No leak.
         match files_manager::PasswordFile::get(&self.username) {
             Some(password_file) => {
                 if crypto::verify_hash_argon2(password_file.master_key_hash, &self.password) {
-                    return Some(crypto::get_sym_key(
-                        &self.password,
-                        &password_file.symetric_key_salt,
-                    ));
+                    let sym_key = Some(crypto::get_sym_key(&self.password, &password_file.symetric_key_salt));
+                    match sym_key {
+                        Some(sym_key) =>{
+                            match files_manager::PasswordFile::get_and_verify(&self.username, &sym_key) {
+                                Some(_) => Some(sym_key),
+                                None => return None,
+                            }
+                        },
+                        None => None,
+                    }
                 } else {
                     return None;
                 }
@@ -44,16 +49,12 @@ impl Credentials {
                     hash.as_bytes().to_vec(),
                     symetric_key.salt,
                 );
-                fm.mac = crypto::authentify_content(
-                    &symetric_key.sym_key,
-                    &fm.format_elements_to_hash(),
-                )
-                .to_vec();
-                return fm.save().is_ok();
+                return fm.save(&symetric_key.sym_key).is_ok();
             }
             Err(_) => return false, // rsa private key encrpytion failed.
         }
     }
+    
     pub fn new(username: String, password: String) -> Credentials {
         Credentials { username, password }
     }

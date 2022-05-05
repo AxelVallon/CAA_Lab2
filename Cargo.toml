@@ -19,3 +19,4 @@ pkcs1 = { version="0.3.3" }
 hmac = "0.12.1"
 vectorize = "0.2.0"
 colorful = "0.2.1"
+copypasta = "0.7.1"

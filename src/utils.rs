@@ -1,7 +1,14 @@
 use colorful::{Colorful, Color};
 use regex::Regex;
+extern crate copypasta;
 
 use crate::{crypto::{AsymetricEncryption, SymetricEncryption}, files_manager::{self, PasswordFile, SharedPasswordIdentificatior}};
+use copypasta::{ClipboardContext, ClipboardProvider};
+
+pub fn copy_to_clipboard(message: &String){
+    let mut ctx = ClipboardContext::new().unwrap();
+    ctx.set_contents(message.clone()).unwrap();
+}
 
 pub fn label_verification(label : &String) -> bool{
     let re = Regex::new(r"[ -~]{1,128}").unwrap();
@@ -111,7 +118,9 @@ pub fn recover_asym_password(
                         .decrypt(&password.encrypted_password, &password.signature)
                     {
                         Ok(clear_password) => {
-                            println!("{}{}", "Password found : ".color(Color::Green), std::str::from_utf8(clear_password.as_slice()).unwrap());
+                            let password = std::str::from_utf8(clear_password.as_slice()).unwrap();
+                            copy_to_clipboard(&password.to_string());
+                            println!("{}{}", "Password found : ".color(Color::Green), password);
                             println!("{}{}", "Password shared by ".color(Color::Cyan), distant_account.as_str().color(Color::Cyan));
                         },
                         Err(_) => println!("{}","Critical error !\n The file of the password that shared this password with you has his file corrupted".color(Color::Red)),
