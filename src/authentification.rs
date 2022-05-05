@@ -1,5 +1,7 @@
-use crate::crypto::SymetricEncryption;
-use crate::crypto::{self, AsymetricEncryption, authentify_content};
+// Author : Axel Vallon
+// Date : 02.05.2022
+use crate::crypto::{self, AsymetricEncryption};
+use crate::crypto::{authentify_content, SymetricEncryption};
 use crate::files_manager;
 
 pub struct Credentials {
@@ -8,34 +10,40 @@ pub struct Credentials {
 }
 
 impl Credentials {
+    /**
+     * Login a user. 
+     * Return : None if failed, Some(symetric_key) otherwise 
+     */
     pub fn login(&self) -> Option<Vec<u8>> {
-        // if file doesn't exist, this user doesn't exist. No leak.
-        match files_manager::PasswordFile::get(&self.username) {
-            Some(password_file) => {
-                if crypto::verify_hash_argon2(password_file.master_key_hash, &self.password) {
-                    let sym_key = Some(crypto::get_sym_key(&self.password, &password_file.symetric_key_salt));
-                    match sym_key {
-                        Some(sym_key) =>{
-                            match files_manager::PasswordFile::get_and_verify(&self.username, &sym_key) {
-                                Some(_) => Some(sym_key),
-                                None => return None,
-                            }
-                        },
-                        None => None,
-                    }
-                } else {
-                    return None;
+        if let Some(password_file) = files_manager::PasswordFile::get(&self.username) {
+            if crypto::verify_hash_argon2(password_file.master_key_hash.clone(), &self.password)
+            {
+                // user has the correct passphrase
+                let sym_key = crypto::get_sym_key(&self.password, &password_file.symetric_key_salt);
+                // verification of file authenticity
+                if password_file.mac.as_slice() == authentify_content( &sym_key, password_file.format_elements_to_hash()).as_slice()
+                {
+                    return Some(sym_key);
                 }
             }
-            None => return None,
         }
+        None
     }
 
+    /**
+     * Register a new user
+     * Generate all needed paramter for a new user 
+     *  - Hash of password
+     *  - Symetric key
+     *  - Salt of symetric key
+     *  - RSA key pair (with encrypted private key)
+     */
     pub fn register(&self) -> bool {
         // user already exist, we leave early.
         if files_manager::PasswordFile::get(&self.username).is_some() {
             return false;
         }
+        // user data generation
         let hash = crypto::hash_password_argon2id(&self.password);
         let symetric_key = crypto::generate_sym_key(&self.password);
         let rsa_keys = AsymetricEncryption::generate_keys();
@@ -49,12 +57,13 @@ impl Credentials {
                     hash.as_bytes().to_vec(),
                     symetric_key.salt,
                 );
-                return fm.save(&symetric_key.sym_key).is_ok();
+                // save the new user in a new file.
+                return fm.save_and_mac(&symetric_key.sym_key).is_ok();
             }
-            Err(_) => return false, // rsa private key encrpytion failed.
+            Err(_) => return false, // rsa private key encryption failed.
         }
     }
-    
+
     pub fn new(username: String, password: String) -> Credentials {
         Credentials { username, password }
     }

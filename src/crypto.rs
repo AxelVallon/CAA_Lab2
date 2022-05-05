@@ -1,3 +1,6 @@
+// Author : Axel Vallon
+// Date : 02.05.2022
+
 use aes_gcm::aead::{Aead, NewAead};
 use aes_gcm::{Aes128Gcm, Key, Nonce};
 use argon2::{self, hash_encoded, Config};
@@ -9,10 +12,17 @@ use sha2::{Digest, Sha256};
 
 use crate::files_manager;
 
+/**
+ * Generation of Argon2 hash for login. Must be long enought to avoid bruteforce.
+ * If moved on a server, feel free to grow these parameters
+ */
 pub fn hash_password_argon2id(password: &String) -> String {
     let salt = rand::rngs::OsRng.gen::<[u8; 16]>(); //16 * 8 = 128 bit as recommended by the author of Argon2
     let mut config = Config::default(); // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-argon2-03#section-9.4
     config.variant = argon2::Variant::Argon2id;
+    config.mem_cost = 8192;
+    config.time_cost = 5;
+    // login done in 0.4s ~
     hash_encoded(password.as_bytes(), &salt, &config).unwrap()
 }
 
@@ -27,11 +37,19 @@ pub struct SymKey {
     pub sym_key: Vec<u8>,
 }
 
+/**
+ * Generation of the symetric based on user input
+ * If this application is upgraded as a server, it schould be more efficace to derive it with HKDF.
+ * At the moment, as the hash is known, the key symetric must be as strong as the login (Or close).
+ * Return : 128 bytes of symetric key with his salt. The Salt must be stored to restore this symetric key.
+ */
 pub fn generate_sym_key(password: &String) -> SymKey {
     let salt = rand::rngs::OsRng.gen::<[u8; 16]>(); //16 * 8 = 128 bit as recommended by the author of Argon2
     let mut config = Config::default(); // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-argon2-03#section-9.4
     config.variant = argon2::Variant::Argon2id;
     config.hash_length = 128;
+    config.mem_cost = 8192;
+    config.time_cost = 5;
     let hash = hash_encoded(password.as_bytes(), &salt, &config).unwrap();
     let sym_key: Vec<u8> = hash.as_bytes()[hash.len() - 16..].to_vec();
     SymKey {
@@ -40,17 +58,26 @@ pub fn generate_sym_key(password: &String) -> SymKey {
     }
 }
 
+/**
+ * Symetric key recovery from password.
+ * Argon2 parameter must be the same as in generate_sym_key()
+ */
 pub fn get_sym_key(password: &String, salt: &[u8]) -> Vec<u8> {
     let mut config = Config::default(); // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-argon2-03#section-9.4
     config.variant = argon2::Variant::Argon2id;
     config.hash_length = 128;
+    config.mem_cost = 8192;
+    config.time_cost = 5;
     let hash = hash_encoded(password.as_bytes(), &salt, &config).unwrap();
     hash.as_bytes()[hash.len() - 16..].to_vec()
 }
 
 // ***************** MAC ********************** //
 
-pub fn authentify_content(key: &[u8], content: &String) -> Output<Hmac<Sha256>> {
+/**
+ * Sign a string with a symetric key using HMAC-SHA256
+ */
+pub fn authentify_content(key: &[u8], content: String) -> Output<Hmac<Sha256>> {
     type HmacSha256 = Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(key).unwrap();
     mac.update(content.as_bytes());
@@ -64,6 +91,12 @@ pub struct SymetricEncryption {
     pub ciphertext: Vec<u8>,
 }
 impl SymetricEncryption {
+    /**
+     * Function that encrypt a message with a symetric key and AES-GCM. 
+     * The tag is included in the message.
+     * Warning : This a stream cypher. Your input size would be the same at output + tag(16 byte).
+     * CPRNG used to create the 96 bit nonce : rand::rngs::OsRng.
+     */
     pub fn encrypt(key: &[u8], message: &[u8]) -> Result<SymetricEncryption, aes_gcm::Error> {
         let key = Key::from_slice(key);
         let cipher = Aes128Gcm::new(key);
@@ -77,6 +110,9 @@ impl SymetricEncryption {
         });
     }
 
+    /**
+     * Decrypt content with the symetric key, the nonce and verify the tag.
+     */
     pub fn decrypt(&self, key: &[u8]) -> Option<Vec<u8>> {
         let key = Key::from_slice(key);
         let cipher = Aes128Gcm::new(key);
@@ -125,10 +161,13 @@ impl AsymetricEncryption {
             .as_ref()
             .to_vec()
     }
-
+    /**
+     * Generate a pair of RSA key of 2048 bits
+     * Please update it to 3078 if your needs are high.
+     */
     pub fn generate_keys() -> Self {
         let mut rng = rand::rngs::OsRng {};
-        let bits = 2048; //TODO sure is enought but maybe 3000 would be ok
+        let bits = 2048;
         let private_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate a key");
         let public_key = RsaPublicKey::from(&private_key);
         Self {
@@ -136,7 +175,11 @@ impl AsymetricEncryption {
             public_key,
         }
     }
-
+    /**
+     * Encrypt a message with a RSA public key and sign with a private key.
+     * RSA-OAEP with SHA-256 used for encryption
+     * RSA-PSS with SHA-256 for signature
+     */
     pub fn encrypt(
         &self,
         message: &[u8],
@@ -155,11 +198,12 @@ impl AsymetricEncryption {
         });
     }
 
-    pub fn decrypt(
-        &self,
-        message: &[u8],
-        signature: &[u8],
-    ) -> Result<Vec<u8>, rsa::errors::Error> {
+    /**
+     * Verify the signature with a RSA public key, and the decrypt with the private key.
+     * RSA-OAEP with SHA-256 used for encryption
+     * RSA-PSS with SHA-256 for signature
+     */
+    pub fn decrypt(&self, message: &[u8], signature: &[u8]) -> Result<Vec<u8>, rsa::errors::Error> {
         let rng = rand::rngs::OsRng {};
         let padding = rsa::PaddingScheme::new_pss::<sha2::Sha256, _>(rng);
         let mut hasher = Sha256::new();

@@ -1,51 +1,80 @@
-use colorful::{Colorful, Color};
+// Author : Axel Vallon
+// Date : 02.05.2022
+use colorful::{Color, Colorful};
 use regex::Regex;
 extern crate copypasta;
 
-use crate::{crypto::{AsymetricEncryption, SymetricEncryption}, files_manager::{self, PasswordFile, SharedPasswordIdentificatior}};
+use crate::{
+    crypto::{AsymetricEncryption, SymetricEncryption},
+    files_manager::{self, PasswordFile, SharedPasswordIdentificatior},
+};
 use copypasta::{ClipboardContext, ClipboardProvider};
 
-pub fn copy_to_clipboard(message: &String){
+/**
+ * Copy a string in Clipboard. Should be multi-platform.
+ */
+pub fn copy_to_clipboard(message: &String) {
     let mut ctx = ClipboardContext::new().unwrap();
     ctx.set_contents(message.clone()).unwrap();
 }
 
-pub fn label_verification(label : &String) -> bool{
+/**
+ * 1 to 128 printable ascii character
+ */
+pub fn label_verification(label: &String) -> bool {
     let re = Regex::new(r"[ -~]{1,128}").unwrap();
     let result = re.is_match(label);
     if !result {
-        println!("{}", "The password label must have 1 to 128 characters".color(Color::Orange1));
+        println!(
+            "{}",
+            "The password label must have 1 to 128 characters".color(Color::Orange1)
+        );
     }
     result
 }
 
-// we only accept 1 to 64 character and <= 128 byte to be sure all passwords have the same lenght
-pub fn password_verification(password : &String) -> bool{
+/**
+ *  Only accept 1 to 64 character and <= 128 byte to ensure all passwords aren't too long.
+ */
+pub fn password_verification(password: &String) -> bool {
     let re = Regex::new(r"^[ -~]{1,64}$").unwrap();
     let result = re.is_match(password) && password.len() <= 128;
     if !result {
-        println!("{}", "The password must have 1 to 64 characters and be less than 128 bytes".color(Color::Orange1));
+        println!(
+            "{}",
+            "The password must have 1 to 64 characters and be less than 128 bytes"
+                .color(Color::Orange1)
+        );
     }
     result
 }
-
-
-pub fn username_verification(username : &String) -> bool{
+/**
+ * 1 to 32 alphanumeric character
+ */
+pub fn username_verification(username: &String) -> bool {
     let re = Regex::new(r"^[a-zA-Z0-9]{1,32}$").unwrap();
     let result = re.is_match(username);
     if !result {
-        println!("{}", "The username must have 1 to 32 alphanumeric characters".color(Color::Orange1));
+        println!(
+            "{}",
+            "The username must have 1 to 32 alphanumeric characters".color(Color::Orange1)
+        );
     }
     result
 }
 
-
-pub fn print_failed_to_save_local_file(){
-    println!("{}","Operation failed. The localfile can not be override at the moment.".color(Color::Orange1));
+pub fn print_failed_to_save_local_file() {
+    println!(
+        "{}",
+        "Operation failed. The localfile can not be override at the moment.".color(Color::Orange1)
+    );
 }
 
-pub fn print_password_to_share_dont_exist(){
-    println!("{}","Operation failed. The password you want to share don't exist.".color(Color::Orange1));
+pub fn print_password_to_share_dont_exist() {
+    println!(
+        "{}",
+        "Operation failed. The password you want to share don't exist.".color(Color::Orange1)
+    );
 }
 
 pub fn print_distant_user_dont_exist() {
@@ -56,10 +85,17 @@ pub fn print_corrupted_local_file() {
     println!("{}","Critical error !\n The file storing your data is corrupted or unreadable at the moment. You have three options :\n - Check if your file is opened elsewhere\n - Recover an old backup to ./data/your_username.json\n - Create a new account and your saved passwords are lost".color(Color::Red));
 }
 
-pub fn print_username(account : &String){
-    print!("{}{}", account.as_str().color(Color::Cyan), " > ".color(Color::Cyan));
+pub fn print_username(account: &String) {
+    print!(
+        "{}{}",
+        account.as_str().color(Color::Cyan),
+        " > ".color(Color::Cyan)
+    );
 }
 
+/**
+ * Decrypt a password with a symetric key, and encrypt it again with a new symetric key.
+ */
 pub fn decrypt_and_encrypt(
     old_sym_key: &[u8],
     new_sym_key: &[u8],
@@ -74,6 +110,9 @@ pub fn decrypt_and_encrypt(
     }
 }
 
+/**
+ * Recover a password in cleartext.
+ */
 pub fn recover_password(
     label_input: &String,
     sym_key: &Vec<u8>,
@@ -97,6 +136,10 @@ pub fn recover_password(
     }
 }
 
+/**
+ * Recover an shared password and print the result.
+ * Copy the result in the clipboard. 
+ */
 pub fn recover_asym_password(
     sym_key: &Vec<u8>,
     password_file: &PasswordFile,
@@ -105,6 +148,7 @@ pub fn recover_asym_password(
 ) {
     let password = password_file.shared_passwords.get(shared_password).unwrap();
     match files_manager::PasswordFile::get(&distant_account) {
+        // decrypt the RSA private key
         Some(distant_file) => {
             let parameters = SymetricEncryption::new(
                 password_file.encrypted_private_key.clone(),
@@ -112,12 +156,14 @@ pub fn recover_asym_password(
             );
             match parameters.decrypt(&sym_key) {
                 Some(clear_private_key) => {
+                    // decrypt the shared password with the rsa private key and verify signature with disant public key
                     let parameters =
                         AsymetricEncryption::new(&clear_private_key, &distant_file.public_key);
                     match parameters
                         .decrypt(&password.encrypted_password, &password.signature)
-                    {
+                    {   
                         Ok(clear_password) => {
+                            // Password found
                             let password = std::str::from_utf8(clear_password.as_slice()).unwrap();
                             copy_to_clipboard(&password.to_string());
                             println!("{}{}", "Password found : ".color(Color::Green), password);
@@ -129,8 +175,10 @@ pub fn recover_asym_password(
                 None => print_corrupted_local_file(),
             }
         }
-        None => println!("{}",
-            "Operation failed. The user that shared with you this password don't exist anymore.".color(Color::Orange1)
+        None => println!(
+            "{}",
+            "Operation failed. The user that shared with you this password don't exist anymore."
+                .color(Color::Orange1)
         ),
     }
 }

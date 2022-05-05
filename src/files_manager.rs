@@ -1,3 +1,7 @@
+// Author : Axel Vallon
+// Date : 02.05.2022
+// Serialize, deserialize, load and save user datas in a File
+
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::OpenOptions, io::Write};
 
@@ -70,9 +74,9 @@ impl PasswordFile {
 
     pub fn format_elements_to_hash(&self) -> String {
         return self.owner.clone()
-            + &format!("{:?}", self.public_key)
-            + &format!("{:?}", self.encrypted_private_key_nonce)
-            + &format!("{:?}", self.encrypted_private_key_nonce);
+            + &format!("{:?}", &self.public_key)
+            + &format!("{:?}", &self.master_key_hash)
+            + &format!("{:?}", &self.symetric_key_salt);
     }
 
     // get the Content of the File in the PasswordFile struct.
@@ -87,31 +91,42 @@ impl PasswordFile {
         None
     }
 
-    pub fn get_and_verify(owner: &String,  sym_key : &Vec<u8>) -> Option<PasswordFile>{
+    /**
+     * Get a file and verify if the file is authentic with a MAC
+     */
+    pub fn get_and_verify(owner: &String, sym_key: &Vec<u8>) -> Option<PasswordFile> {
         let password_file = Self::get(owner)?;
-        if password_file.mac == authentify_content(sym_key, &password_file.format_elements_to_hash()).as_slice() {
+        if password_file.mac
+            == authentify_content(sym_key, password_file.format_elements_to_hash()).as_slice()
+        {
             Some(password_file)
-        }
-        else{
+        } else {
             None
         }
     }
 
-    pub fn save(&mut self, sym_key : &Vec<u8>) -> std::io::Result<()> {
-        self.mac = authentify_content(sym_key, &self.format_elements_to_hash()).as_slice().to_vec();
+    /**
+     * Save the user data and update the MAC.
+     */
+    pub fn save(&mut self) -> std::io::Result<()> {
         const PATH_TO_DATABASE: &str = "data/";
-        //self.format_elements_to_hash();
-        std::fs::remove_file(PATH_TO_DATABASE.to_string() + &self.owner + ".json").ok();
         // open the file, if non existant, create it, if existant, override.
         let mut file = OpenOptions::new()
-            .create_new(true)
+            .create(true)
             .write(true)
             .open(PATH_TO_DATABASE.to_string() + &self.owner + ".json")?;
+        // write user data nicely
         serde_json::to_writer_pretty(&mut file, &self)?;
         file.flush()?;
         file.sync_all()?;
         Ok(())
     }
+
+    pub fn save_and_mac(&mut self, sym_key: &Vec<u8>)  -> std::io::Result<()>  {
+        self.mac = authentify_content(sym_key, self.format_elements_to_hash()).as_slice().to_vec();
+        self.save()
+    }
+
 }
 #[cfg(test)]
 mod tests {
@@ -127,7 +142,7 @@ mod tests {
             "master_key_hash".as_bytes().to_vec(),
             "symetric_key_salut".as_bytes().to_vec(),
         );
-        assert!(password_file.save(&"fake_key".as_bytes().to_vec()).is_ok());
+        assert!(password_file.save().is_ok());
         assert!(
             password_file.owner
                 == PasswordFile::get(&"owner_that_schould_not_exist[".to_string())
