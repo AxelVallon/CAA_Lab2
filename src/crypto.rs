@@ -20,8 +20,8 @@ pub fn hash_password_argon2id(password: &String) -> String {
     let salt = rand::rngs::OsRng.gen::<[u8; 16]>(); //16 * 8 = 128 bit as recommended by the author of Argon2
     let mut config = Config::default(); // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-argon2-03#section-9.4
     config.variant = argon2::Variant::Argon2id;
-    config.mem_cost = 8192;
-    config.time_cost = 5;
+    config.mem_cost = 65_536;
+    config.time_cost = 3;
     // login done in 0.4s ~
     hash_encoded(password.as_bytes(), &salt, &config).unwrap()
 }
@@ -47,9 +47,9 @@ pub fn generate_sym_key(password: &String) -> SymKey {
     let salt = rand::rngs::OsRng.gen::<[u8; 16]>(); //16 * 8 = 128 bit as recommended by the author of Argon2
     let mut config = Config::default(); // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-argon2-03#section-9.4
     config.variant = argon2::Variant::Argon2id;
-    config.hash_length = 128;
-    config.mem_cost = 8192;
-    config.time_cost = 5;
+    config.hash_length = 16;
+    config.mem_cost = 65_536;
+    config.time_cost = 3;
     let hash = hash_encoded(password.as_bytes(), &salt, &config).unwrap();
     let sym_key: Vec<u8> = hash.as_bytes()[hash.len() - 16..].to_vec();
     SymKey {
@@ -65,9 +65,9 @@ pub fn generate_sym_key(password: &String) -> SymKey {
 pub fn get_sym_key(password: &String, salt: &[u8]) -> Vec<u8> {
     let mut config = Config::default(); // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-argon2-03#section-9.4
     config.variant = argon2::Variant::Argon2id;
-    config.hash_length = 128;
-    config.mem_cost = 8192;
-    config.time_cost = 5;
+    config.hash_length = 16;
+    config.mem_cost = 65_536;
+    config.time_cost = 3;
     let hash = hash_encoded(password.as_bytes(), &salt, &config).unwrap();
     hash.as_bytes()[hash.len() - 16..].to_vec()
 }
